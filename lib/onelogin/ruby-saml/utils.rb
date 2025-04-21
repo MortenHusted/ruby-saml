@@ -378,11 +378,16 @@ module OneLogin
 
       # Obtains the deciphered text
       # @param cipher_text [String]   The ciphered text
-      # @param key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
+      # @param decryption_key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
       # @param algorithm [String]     The encrypted algorithm
       # @param digest_algorithm [String] The digest algorithm
       # @return [String] The deciphered text
       def self.retrieve_plaintext(cipher_text, decryption_key, algorithm, digest_algorithm = nil)
+        if digest_algorithm
+          puts "digest_algorithm: #{digest_algorithm.inspect}"
+          puts "algorithm: #{algorithm.inspect}"
+        end
+
         case algorithm
         when 'http://www.w3.org/2001/04/xmlenc#rsa-1_5'
           rsa = decryption_key
