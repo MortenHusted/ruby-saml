@@ -306,20 +306,25 @@ module OneLogin
           "./xenc:EncryptedData",
           { 'xenc' => XENC }
         )
+
         symmetric_key = retrieve_symmetric_key(encrypt_data, private_key)
+
         cipher_value = REXML::XPath.first(
           encrypt_data,
           "./xenc:CipherData/xenc:CipherValue",
           { 'xenc' => XENC }
         )
+
         node = Base64.decode64(element_text(cipher_value))
+
         encrypt_method = REXML::XPath.first(
           encrypt_data,
           "./xenc:EncryptionMethod",
           { 'xenc' => XENC }
         )
+
         algorithm = encrypt_method.attributes['Algorithm']
-        retrieve_plaintext(node, symmetric_key, algorithm)
+        retrieve_plaintext(node, symmetric_key, algorithm, nil)
       end
 
       # Obtains the symmetric key from the EncryptedData element
@@ -348,8 +353,19 @@ module OneLogin
           "xenc" => XENC
         )
 
+        digest_algorithm = REXML::XPath.first(
+          encrypt_method,
+          "./ds:DigestMethod",
+          "ds" => DSIG
+        )&.attributes&.[]('Algorithm')
+
         algorithm = encrypt_method.attributes['Algorithm']
-        retrieve_plaintext(cipher_text, private_key, algorithm)
+
+        if algorithm == "http://www.w3.org/2009/xmlenc11#rsa-oaep"
+          puts "digest_algorithm: #{digest_algorithm.inspect}"
+        end
+
+        retrieve_plaintext(cipher_text, private_key, algorithm, digest_algorithm)
       end
 
       def self.retrieve_symetric_key_reference(encrypt_data)
@@ -362,19 +378,47 @@ module OneLogin
 
       # Obtains the deciphered text
       # @param cipher_text [String]   The ciphered text
-      # @param key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
+      # @param decryption_key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
       # @param algorithm [String]     The encrypted algorithm
+      # @param digest_algorithm [String] The digest algorithm
       # @return [String] The deciphered text
-      def self.retrieve_plaintext(cipher_text, key, algorithm)
+      def self.retrieve_plaintext(cipher_text, decryption_key, algorithm, digest_algorithm = nil)
         case algorithm
         when 'http://www.w3.org/2001/04/xmlenc#rsa-1_5'
-          return key.private_decrypt(cipher_text)
+          rsa = decryption_key
+          return rsa.private_decrypt(cipher_text)
         when 'http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p', 'http://www.w3.org/2001/04/xmlenc#rsa-oaep'
-          return key.private_decrypt(cipher_text, OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING)
+          rsa = decryption_key
+
+          puts "digest_algorithm: #{digest_algorithm.inspect}"
+          puts "algorithm: #{algorithm.inspect}"
+          case digest_algorithm
+          when 'http://www.w3.org/2001/04/xmlenc#sha256'
+
+            puts "cipher_text: #{cipher_text.inspect}"
+
+            rsa_options = {
+              "rsa_padding_mode": "oaep",
+              "rsa_oaep_md": "sha256",
+              "rsa_mgf1_md": "sha256"
+            }
+
+            return rsa.decrypt(cipher_text, rsa_options)
+          when "http://www.w3.org/2000/09/xmldsig#sha1"
+            rsa_options = {
+              "rsa_padding_mode": "oaep",
+              "rsa_oaep_md": "sha1",
+              "rsa_mgf1_md": "sha1"
+            }
+
+            return rsa.decrypt(cipher_text, rsa_options)
+          else
+            return rsa.private_decrypt(cipher_text, OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING)
+          end
         end
 
         # if we reach this point, we know we are dealing with AES or DES descryption, and the key is symmetric
-
+        symmetric_key = decryption_key
         assertion_plaintext = nil
         cipher = nil
         auth_cipher = nil
@@ -403,14 +447,14 @@ module OneLogin
           if cipher # CBC mode
             iv_len = cipher.iv_len
             data = cipher_text[iv_len..-1]
-            cipher.padding, cipher.key, cipher.iv = 0, key, cipher_text[0..iv_len-1]
+            cipher.padding, cipher.key, cipher.iv = 0, symmetric_key, cipher_text[0..iv_len-1]
             assertion_plaintext = cipher.update(data)
             assertion_plaintext << cipher.final
           elsif auth_cipher # GCM mode
             iv_len, text_len, tag_len = auth_cipher.iv_len, cipher_text.length, 16
             data = cipher_text[iv_len..text_len-1-tag_len]
             auth_cipher.padding = 0
-            auth_cipher.key = key
+            auth_cipher.key = symmetric_key
             auth_cipher.iv = cipher_text[0..iv_len-1]
             auth_cipher.auth_data = ''
             auth_cipher.auth_tag = cipher_text[text_len-tag_len..-1]
