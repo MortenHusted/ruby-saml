@@ -378,7 +378,7 @@ module OneLogin
 
       # Obtains the deciphered text
       # @param cipher_text [String]   The ciphered text
-      # @param decryption_key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
+      # @param key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
       # @param algorithm [String]     The encrypted algorithm
       # @param digest_algorithm [String] The digest algorithm
       # @return [String] The deciphered text
