@@ -362,45 +362,64 @@ module OneLogin
 
       # Obtains the deciphered text
       # @param cipher_text [String]   The ciphered text
-      # @param symmetric_key [String] The symmetric key used to encrypt the text
+      # @param key [String|OpenSSL::PKey::RSA] The Symmetric key (for AES/DES) OR the RSA private key (for RSA)
       # @param algorithm [String]     The encrypted algorithm
       # @return [String] The deciphered text
-      def self.retrieve_plaintext(cipher_text, symmetric_key, algorithm)
+      def self.retrieve_plaintext(cipher_text, key, algorithm)
         case algorithm
-          when 'http://www.w3.org/2001/04/xmlenc#tripledes-cbc' then cipher = OpenSSL::Cipher.new('DES-EDE3-CBC').decrypt
-          when 'http://www.w3.org/2001/04/xmlenc#aes128-cbc' then cipher = OpenSSL::Cipher.new('AES-128-CBC').decrypt
-          when 'http://www.w3.org/2001/04/xmlenc#aes192-cbc' then cipher = OpenSSL::Cipher.new('AES-192-CBC').decrypt
-          when 'http://www.w3.org/2001/04/xmlenc#aes256-cbc' then cipher = OpenSSL::Cipher.new('AES-256-CBC').decrypt
-          when 'http://www.w3.org/2009/xmlenc11#aes128-gcm' then auth_cipher = OpenSSL::Cipher::AES.new(128, :GCM).decrypt
-          when 'http://www.w3.org/2009/xmlenc11#aes192-gcm' then auth_cipher = OpenSSL::Cipher::AES.new(192, :GCM).decrypt
-          when 'http://www.w3.org/2009/xmlenc11#aes256-gcm' then auth_cipher = OpenSSL::Cipher::AES.new(256, :GCM).decrypt
-          when 'http://www.w3.org/2001/04/xmlenc#rsa-1_5' then rsa = symmetric_key
-          when 'http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p' then oaep = symmetric_key
+        when 'http://www.w3.org/2001/04/xmlenc#rsa-1_5'
+          return key.private_decrypt(cipher_text)
+        when 'http://www.w3.org/2001/04/xmlenc#rsa-oaep-mgf1p', 'http://www.w3.org/2001/04/xmlenc#rsa-oaep'
+          return key.private_decrypt(cipher_text, OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING)
         end
 
-        if cipher
-          iv_len = cipher.iv_len
-          data = cipher_text[iv_len..-1]
-          cipher.padding, cipher.key, cipher.iv = 0, symmetric_key, cipher_text[0..iv_len-1]
-          assertion_plaintext = cipher.update(data)
-          assertion_plaintext << cipher.final
-        elsif auth_cipher
-          iv_len, text_len, tag_len = auth_cipher.iv_len, cipher_text.length, 16
-          data = cipher_text[iv_len..text_len-1-tag_len]
-          auth_cipher.padding = 0
-          auth_cipher.key = symmetric_key
-          auth_cipher.iv = cipher_text[0..iv_len-1]
-          auth_cipher.auth_data = ''
-          auth_cipher.auth_tag = cipher_text[text_len-tag_len..-1]
-          assertion_plaintext = auth_cipher.update(data)
-          assertion_plaintext << auth_cipher.final
-        elsif rsa
-          rsa.private_decrypt(cipher_text)
-        elsif oaep
-          oaep.private_decrypt(cipher_text, OpenSSL::PKey::RSA::PKCS1_OAEP_PADDING)
+        # if we reach this point, we know we are dealing with AES or DES descryption, and the key is symmetric
+
+        assertion_plaintext = nil
+        cipher = nil
+        auth_cipher = nil
+
+
+        case algorithm
+        when 'http://www.w3.org/2001/04/xmlenc#tripledes-cbc'
+          cipher = OpenSSL::Cipher.new('DES-EDE3-CBC').decrypt
+        when 'http://www.w3.org/2001/04/xmlenc#aes128-cbc'
+          cipher = OpenSSL::Cipher.new('AES-128-CBC').decrypt
+        when 'http://www.w3.org/2001/04/xmlenc#aes192-cbc'
+          cipher = OpenSSL::Cipher.new('AES-192-CBC').decrypt
+        when 'http://www.w3.org/2001/04/xmlenc#aes256-cbc'
+          cipher = OpenSSL::Cipher.new('AES-256-CBC').decrypt
+        when 'http://www.w3.org/2009/xmlenc11#aes128-gcm'
+          auth_cipher = OpenSSL::Cipher::AES.new(128, :GCM).decrypt
+        when 'http://www.w3.org/2009/xmlenc11#aes192-gcm'
+          auth_cipher = OpenSSL::Cipher::AES.new(192, :GCM).decrypt
+        when 'http://www.w3.org/2009/xmlenc11#aes256-gcm'
+          auth_cipher = OpenSSL::Cipher::AES.new(256, :GCM).decrypt
         else
-          cipher_text
+          return cipher_text # Unsupported algorithm
         end
+
+        begin
+          if cipher # CBC mode
+            iv_len = cipher.iv_len
+            data = cipher_text[iv_len..-1]
+            cipher.padding, cipher.key, cipher.iv = 0, key, cipher_text[0..iv_len-1]
+            assertion_plaintext = cipher.update(data)
+            assertion_plaintext << cipher.final
+          elsif auth_cipher # GCM mode
+            iv_len, text_len, tag_len = auth_cipher.iv_len, cipher_text.length, 16
+            data = cipher_text[iv_len..text_len-1-tag_len]
+            auth_cipher.padding = 0
+            auth_cipher.key = key
+            auth_cipher.iv = cipher_text[0..iv_len-1]
+            auth_cipher.auth_data = ''
+            auth_cipher.auth_tag = cipher_text[text_len-tag_len..-1]
+            assertion_plaintext = auth_cipher.update(data)
+            assertion_plaintext << auth_cipher.final
+          end
+        end
+
+        assertion_plaintext
       end
 
       def self.set_prefix(value)
