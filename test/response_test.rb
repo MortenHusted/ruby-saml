@@ -1715,11 +1715,24 @@ class RubySamlTest < Minitest::Test
           return unless OpenSSL::Cipher.ciphers.include? 'AES-256-GCM'
           unsigned_message_aes256gcm_encrypted_signed_assertion = read_response('unsigned_message_aes256gcm_encrypted_signed_assertion.xml.base64')
           response = OneLogin::RubySaml::Response.new(unsigned_message_aes256gcm_encrypted_signed_assertion, :settings => settings)
+
+          Rails.logger.info "response.document: #{response.document.inspect}"
+          Rails.logger.info "response.decrypted_document: #{response.decrypted_document.inspect}"
+
+          assert_equal "test1234", response.attributes[:uid]
+          assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
+        end
+
+        it "EncryptionMethod AES-256-GCM && Key Encryption Algorithm RSA-OAEP with SHA-256" do
+          return unless OpenSSL::Cipher.ciphers.include? 'aes-256-gcm'
+
+          fixture_response = read_response('generated_unsigned_message_aes256gcm_sha256_rsa_oaep_encrypted_signed_assertion.xml.base64')
+          response = OneLogin::RubySaml::Response.new(fixture_response, :settings => settings)
+
           assert_equal "test", response.attributes[:uid]
           assert_equal "_ce3d2948b4cf20146dee0a0b3dd6f69b6cf86f62d7", response.nameid
         end
       end
-
     end
 
     describe "#status_code" do
